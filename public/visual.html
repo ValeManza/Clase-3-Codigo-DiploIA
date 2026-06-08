@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Gabor Noise Visual</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #000;
+    }
+    canvas {
+      display: block;
+      width: 100vw;
+      height: 100vh;
+    }
+
+    #status {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      padding: 8px 16px;
+      border-radius: 20px;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      font-size: 13px;
+      font-weight: 500;
+      background: rgba(0,0,0,0.6);
+      color: #fff;
+      pointer-events: none;
+      transition: opacity 0.4s;
+      z-index: 10;
+      backdrop-filter: blur(8px);
+      border: 1px solid rgba(255,255,255,0.1);
+    }
+    #status .dot {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      margin-right: 8px;
+      vertical-align: middle;
+    }
+    #status .dot.connected { background: #4ade80; }
+    #status .dot.disconnected { background: #f87171; }
+    #status .dot.connecting { background: #fbbf24; }
+
+    #hint {
+      position: fixed;
+      bottom: 30px;
+      left: 50%;
+      transform: translateX(-50%);
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      font-size: 14px;
+      color: rgba(255,255,255,0.3);
+      background: rgba(0,0,0,0.5);
+      padding: 8px 20px;
+      border-radius: 20px;
+      backdrop-filter: blur(8px);
+      border: 1px solid rgba(255,255,255,0.05);
+      pointer-events: none;
+      z-index: 10;
+      text-align: center;
+      transition: opacity 1s;
+    }
+    #hint.hidden { opacity: 0; }
+  </style>
+</head>
+<body>
+  <div id="status">
+    <span class="dot connecting" id="statusDot"></span>
+    <span id="statusText">Connecting...</span>
+  </div>
+  <div id="hint">Ajusta los parámetros desde el panel de control</div>
+
+  <canvas id="glCanvas"></canvas>
+
+  <script>
+    // ---- WebGL Setup ----
+    const canvas = document.getElementById('glCanvas');
+    const gl = canvas.getContext('webgl', { antialias: true, alpha: false });
+
+    if (!gl) {
+      document.body.innerHTML = '<div style="color:#fff;padding:40px;font-family:sans-serif;">WebGL no está soportado en tu navegador.</div>';
+      throw new Error('WebGL not supported');
+    }
+
+    // ---- FBO ----
+    let fbo = null;
+    let fboTex = null;
+
+    function resizeCanvas() {
+      canvas.width = window.innerWidth * devicePixelRatio;
+      canvas.height = window.innerHeight * devicePixelRatio;
+      gl.viewport(0, 0, canvas.width, canvas.height);
+      resizeFBO();
+    }
+    window.addEventListener('resize', resizeCanvas);
+    resizeCanvas();
+
+    // ---- Auto fullscreen ----
+    document.addEventListener('click', () => {
+      if (!document.fullscreenElement && document.documentElement.requestFullscreen) {
+        document.documentElement.requestFullscreen().catch(() => {});
+      }
+    }, { once: true });
+
+    // ---- Shader helpers ----
+    function createShader(type, source) {
+      const s = gl.createShader(type);
+      gl.shaderSource(s, source);
+      gl.compileShader(s);
+      if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+        console.error(gl.getShaderInfoLog(s));
+        gl.deleteShader(s);
+        return null;
+      }
+      return s;
+    }
+
+    function createProgram(vsSrc, fsSrc) {
+      const vs = createShader(gl.VERTEX_SHADER, vsSrc);
+      const fs = createShader(gl.FRAGMENT_SHADER, fsSrc);
+      const prog = gl.createProgram();
+      gl.attachShader(prog, vs);
+      gl.attachShader(prog, fs);
+      gl.linkProgram(prog);
+      if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+        console.error(gl.getProgramInfoLog(prog));
+        return null;
+      }
+      return prog;
+    }
+
+    // ---- Fullscreen quad ----
+    const quadVertices = new Float32Array([
+      -1, -1,   1, -1,   -1,  1,
+      -1,  1,   1, -1,    1,  1
+    ]);
+    const quadBuf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, quadVertices, gl.STATIC_DRAW);
+
+    const vsSrc = `
+      attribute vec2 aPos;
+      void main() {
+        gl_Position = vec4(aPos, 0.0, 1.0);
+      }
+    `;
+
+    function resizeFBO() {
+      const w = canvas.width;
+      const h = canvas.height;
+      if (!fbo) fbo = gl.createFramebuffer();
+      if (!fboTex) fboTex = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, fboTex);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, fboTex, 0);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    }
+
+    function setupAttribute(prog) {
+      const aPos = gl.getAttribLocation(prog, 'aPos');
+      gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf);
+      gl.enableVertexAttribArray(aPos);
+      gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+    }
+
+    // ---- Programs & Uniforms ----
+    let gaborProgram = null;
+    let gaborUniforms = {};
+    let bloomProgram = null;
+    let bloomUniforms = {};
+
+    function initGaborShader(fsSrc) {
+      if (gaborProgram) gl.deleteProgram(gaborProgram);
+      gaborProgram = createProgram(vsSrc, fsSrc);
+      if (!gaborProgram) return false;
+
+      gl.useProgram(gaborProgram);
+      setupAttribute(gaborProgram);
+
+      gaborUniforms = {
+        uResolution:  gl.getUniformLocation(gaborProgram, 'uResolution'),
+        uTime:       gl.getUniformLocation(gaborProgram, 'uTime'),
+        uFrequency:  gl.getUniformLocation(gaborProgram, 'uFrequency'),
+        uAmplitude:  gl.getUniformLocation(gaborProgram, 'uAmplitude'),
+        uSpeed:      gl.getUniformLocation(gaborProgram, 'uSpeed'),
+        uSigma:      gl.getUniformLocation(gaborProgram, 'uSigma'),
+        uOrientation:gl.getUniformLocation(gaborProgram, 'uOrientation'),
+        uColor1:     gl.getUniformLocation(gaborProgram, 'uColor1'),
+        uColor2:     gl.getUniformLocation(gaborProgram, 'uColor2'),
+        uColor3:     gl.getUniformLocation(gaborProgram, 'uColor3'),
+        uKernelScale:gl.getUniformLocation(gaborProgram, 'uKernelScale'),
+        uWarp:       gl.getUniformLocation(gaborProgram, 'uWarp'),
+        uTimeScale:  gl.getUniformLocation(gaborProgram, 'uTimeScale'),
+        uDensity:    gl.getUniformLocation(gaborProgram, 'uDensity'),
+        uRippleAmount:gl.getUniformLocation(gaborProgram, 'uRippleAmount'),
+        uRippleFreq: gl.getUniformLocation(gaborProgram, 'uRippleFreq'),
+        uRippleSpeed:gl.getUniformLocation(gaborProgram, 'uRippleSpeed'),
+      };
+      return true;
+    }
+
+    function initBloomShader(fsSrc) {
+      if (bloomProgram) gl.deleteProgram(bloomProgram);
+      bloomProgram = createProgram(vsSrc, fsSrc);
+      if (!bloomProgram) return false;
+
+      gl.useProgram(bloomProgram);
+      setupAttribute(bloomProgram);
+
+      bloomUniforms = {
+        uScene:        gl.getUniformLocation(bloomProgram, 'uScene'),
+        uResolution:   gl.getUniformLocation(bloomProgram, 'uResolution'),
+        uGlowIntensity:gl.getUniformLocation(bloomProgram, 'uGlowIntensity'),
+        uGlowRadius:   gl.getUniformLocation(bloomProgram, 'uGlowRadius'),
+      };
+      gl.uniform1i(bloomUniforms.uScene, 0);
+      return true;
+    }
+
+    // ---- Default parameters ----
+    let params = {
+      frequency:    3.0,
+      amplitude:    1.2,
+      sigma:        0.9,
+      orientation:  0.6,
+      color1:       [0.0, 0.0, 0.0],
+      color2:       [0.329, 0.812, 0.490],
+      color3:       [0.486, 0.361, 0.988],
+      warp:         2.5,
+      glowIntensity:0.35,
+      glowRadius:   0.5,
+      rippleAmount: 0.15,
+      rippleFreq:   1.0,
+      rippleSpeed:  1.0,
+    };
+
+    // ---- Interpolation ----
+    let current = { ...params };
+    const lerpFactor = 0.08;
+    const colorLerpFactor = 0.03;
+
+    // ---- Load shaders ----
+    let shadersLoaded = 0;
+
+    function onShaderLoaded() {
+      shadersLoaded++;
+      if (shadersLoaded === 2) renderLoop();
+    }
+
+    fetch('gabor.frag')
+      .then(r => r.text())
+      .then(src => {
+        if (!initGaborShader(src)) {
+          document.body.innerHTML = '<div style="color:#f88;padding:40px;font-family:sans-serif;">Error al compilar el shader de ruido.</div>';
+          return;
+        }
+        onShaderLoaded();
+      })
+      .catch(() => {
+        document.body.innerHTML = '<div style="color:#f88;padding:40px;font-family:sans-serif;">Error al cargar gabor.frag</div>';
+      });
+
+    fetch('bloom.frag')
+      .then(r => r.text())
+      .then(src => {
+        if (!initBloomShader(src)) {
+          console.warn('Bloom shader no compiló');
+          onShaderLoaded();
+          return;
+        }
+        onShaderLoaded();
+      })
+      .catch(() => {
+        console.warn('bloom.frag no encontrado');
+        onShaderLoaded();
+      });
+
+    // ---- Render loop (two-pass) ----
+    let startTime = performance.now();
+
+    function renderLoop() {
+      if (!gaborProgram) {
+        requestAnimationFrame(renderLoop);
+        return;
+      }
+
+      const now = (performance.now() - startTime) / 1000;
+
+      for (const key in params) {
+        if (key === 'color1' || key === 'color2' || key === 'color3') {
+          current[key][0] += (params[key][0] - current[key][0]) * colorLerpFactor;
+          current[key][1] += (params[key][1] - current[key][1]) * colorLerpFactor;
+          current[key][2] += (params[key][2] - current[key][2]) * colorLerpFactor;
+        } else if (typeof params[key] === 'number') {
+          current[key] += (params[key] - current[key]) * lerpFactor;
+        }
+      }
+
+      // ---- Pass 1: Gabor noise to FBO ----
+      gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+      gl.viewport(0, 0, canvas.width, canvas.height);
+      gl.useProgram(gaborProgram);
+      setupAttribute(gaborProgram);
+
+      gl.uniform2f(gaborUniforms.uResolution, canvas.width, canvas.height);
+      gl.uniform1f(gaborUniforms.uTime, now);
+      gl.uniform1f(gaborUniforms.uFrequency, current.frequency);
+      gl.uniform1f(gaborUniforms.uAmplitude, current.amplitude);
+      gl.uniform1f(gaborUniforms.uSpeed, 0.8);
+      gl.uniform1f(gaborUniforms.uSigma, current.sigma);
+      gl.uniform1f(gaborUniforms.uOrientation, current.orientation);
+      gl.uniform3fv(gaborUniforms.uColor1, current.color1);
+      gl.uniform3fv(gaborUniforms.uColor2, current.color2);
+      gl.uniform3fv(gaborUniforms.uColor3, current.color3);
+      gl.uniform1f(gaborUniforms.uKernelScale, 6.0);
+      gl.uniform1f(gaborUniforms.uWarp, current.warp);
+      gl.uniform1f(gaborUniforms.uTimeScale, 1.0);
+      gl.uniform1f(gaborUniforms.uDensity, 4.0);
+      gl.uniform1f(gaborUniforms.uRippleAmount, current.rippleAmount);
+      gl.uniform1f(gaborUniforms.uRippleFreq, current.rippleFreq);
+      gl.uniform1f(gaborUniforms.uRippleSpeed, current.rippleSpeed);
+
+      gl.drawArrays(gl.TRIANGLES, 0, 6);
+
+      // ---- Pass 2: Bloom to screen ----
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.viewport(0, 0, canvas.width, canvas.height);
+
+      if (bloomProgram && current.glowIntensity > 0.01) {
+        gl.useProgram(bloomProgram);
+        setupAttribute(bloomProgram);
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, fboTex);
+        gl.uniform2f(bloomUniforms.uResolution, canvas.width, canvas.height);
+        gl.uniform1f(bloomUniforms.uGlowIntensity, current.glowIntensity);
+        gl.uniform1f(bloomUniforms.uGlowRadius, current.glowRadius);
+        gl.drawArrays(gl.TRIANGLES, 0, 6);
+      } else {
+        gl.useProgram(bloomProgram || gaborProgram);
+        if (bloomProgram) {
+          setupAttribute(bloomProgram);
+          gl.activeTexture(gl.TEXTURE0);
+          gl.bindTexture(gl.TEXTURE_2D, fboTex);
+          gl.uniform2f(bloomUniforms.uResolution, canvas.width, canvas.height);
+          gl.uniform1f(bloomUniforms.uGlowIntensity, 0);
+          gl.uniform1f(bloomUniforms.uGlowRadius, 0);
+          gl.drawArrays(gl.TRIANGLES, 0, 6);
+        }
+      }
+
+      requestAnimationFrame(renderLoop);
+    }
+
+    // ---- WebSocket ----
+    const statusDot = document.getElementById('statusDot');
+    const statusText = document.getElementById('statusText');
+    const hint = document.getElementById('hint');
+    let ws = null;
+    let reconnectTimer = null;
+
+    function connectWS() {
+      const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const url = `${proto}//${window.location.host}`;
+
+      statusDot.className = 'dot connecting';
+      statusText.textContent = 'Conectando...';
+
+      ws = new WebSocket(url);
+
+      ws.onopen = () => {
+        statusDot.className = 'dot connected';
+        statusText.textContent = 'Conectado';
+        hint.classList.remove('hidden');
+        setTimeout(() => hint.classList.add('hidden'), 5000);
+      };
+
+      ws.onmessage = (e) => {
+        try {
+          const msg = JSON.parse(e.data);
+          if (msg.type === 'params' && msg.data) {
+            const d = msg.data;
+            if (d.frequency !== undefined) params.frequency = d.frequency;
+            if (d.amplitude !== undefined) params.amplitude = d.amplitude;
+            if (d.sigma !== undefined) params.sigma = d.sigma;
+            if (d.orientation !== undefined) params.orientation = d.orientation;
+            if (d.warp !== undefined) params.warp = d.warp;
+            if (d.rippleAmount !== undefined) params.rippleAmount = d.rippleAmount;
+            if (d.rippleFreq !== undefined) params.rippleFreq = d.rippleFreq;
+            if (d.rippleSpeed !== undefined) params.rippleSpeed = d.rippleSpeed;
+            if (d.glowIntensity !== undefined) params.glowIntensity = d.glowIntensity;
+            if (d.glowRadius !== undefined) params.glowRadius = d.glowRadius;
+            if (d.color1) params.color1 = d.color1;
+            if (d.color2) params.color2 = d.color2;
+            if (d.color3) params.color3 = d.color3;
+          }
+        } catch(err) {}
+      };
+
+      ws.onclose = () => {
+        statusDot.className = 'dot disconnected';
+        statusText.textContent = 'Desconectado';
+        clearTimeout(reconnectTimer);
+        reconnectTimer = setTimeout(connectWS, 2000);
+      };
+
+      ws.onerror = () => { ws.close(); };
+
+      window.addEventListener('beforeunload', () => {
+        clearTimeout(reconnectTimer);
+        if (ws) ws.close();
+      });
+    }
+
+    connectWS();
+  </script>
+</body>
+</html>
