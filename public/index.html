@@ -180,21 +180,34 @@
 
   <!-- ===== User Presets Section ===== -->
   <div class="section">
-    <div class="section-title">Mis Presets</div>
-    <div class="card-grid">
-      <div class="card card-full">
-        <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap">
-          <input type="text" id="presetName" placeholder="Nombre del preset" style="flex:1;min-width:120px;padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:var(--bg-input);color:var(--text-primary);font-size:13px;outline:none" />
-          <button class="btn-preset" id="savePresetBtn" style="background:var(--accent);color:#fff;border:none">Guardar</button>
-        </div>
-        <select id="presetSelect" style="width:100%;padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:var(--bg-input);color:var(--text-primary);font-size:13px;outline:none;margin-bottom:10px">
-          <option value="">— Seleccionar preset —</option>
-        </select>
-        <div style="display:flex;gap:8px">
-          <button class="btn-preset" id="loadPresetBtn">Cargar</button>
-          <button class="btn-preset reset" id="deletePresetBtn">Eliminar</button>
+    <div class="section-title">
+      Mis Presets
+      <span class="preset-count" id="presetCount">0</span>
+    </div>
+
+    <!-- Save controls with live preview -->
+    <div class="card card-full">
+      <div class="save-area">
+        <canvas id="previewCanvas" class="preview-canvas"></canvas>
+        <div class="save-form">
+          <input type="text" id="presetName" placeholder="Nombre del nuevo preset..." />
+          <button class="btn-preset save-btn" id="savePresetBtn">Guardar como</button>
         </div>
       </div>
+    </div>
+
+    <!-- Visual preset thumbnail grid -->
+    <div class="preset-grid" id="presetGrid">
+      <!-- Filled dynamically by JavaScript -->
+    </div>
+
+    <!-- Delete button for selected -->
+    <div class="preset-actions" id="presetActions" style="display:none">
+      <button class="btn-preset delete-btn" id="deletePresetBtn">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
+        Eliminar seleccionado
+      </button>
+      <span class="preset-selected-label" id="selectedLabel"></span>
     </div>
   </div>
 
@@ -207,7 +220,246 @@
 
 <script>
   // ============================================================
-  //  Control Panel — WebSocket + UI Logic
+  //  WebGL Preview Canvas
+  // ============================================================
+
+  const previewCanvas = document.getElementById('previewCanvas');
+  const previewGl = previewCanvas.getContext('webgl', {
+    antialias: true,
+    alpha: false,
+    preserveDrawingBuffer: true
+  });
+
+  if (!previewGl) {
+    console.warn('WebGL no disponible para preview');
+  }
+
+  // ---- Shader helpers ----
+  function createShader(gl, type, source) {
+    const s = gl.createShader(type);
+    gl.shaderSource(s, source);
+    gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+      console.error(gl.getShaderInfoLog(s));
+      gl.deleteShader(s);
+      return null;
+    }
+    return s;
+  }
+
+  function createProgram(gl, vsSrc, fsSrc) {
+    const vs = createShader(gl, gl.VERTEX_SHADER, vsSrc);
+    const fs = createShader(gl, gl.FRAGMENT_SHADER, fsSrc);
+    const prog = gl.createProgram();
+    gl.attachShader(prog, vs);
+    gl.attachShader(prog, fs);
+    gl.linkProgram(prog);
+    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+      console.error(gl.getProgramInfoLog(prog));
+      return null;
+    }
+    return prog;
+  }
+
+  // ---- Fullscreen quad (only if WebGL available) ----
+  let quadBuf = null;
+  if (previewGl) {
+    const quadVertices = new Float32Array([
+      -1, -1,   1, -1,   -1,  1,
+      -1,  1,   1, -1,    1,  1
+    ]);
+    quadBuf = previewGl.createBuffer();
+    previewGl.bindBuffer(previewGl.ARRAY_BUFFER, quadBuf);
+    previewGl.bufferData(previewGl.ARRAY_BUFFER, quadVertices, previewGl.STATIC_DRAW);
+  }
+
+  const previewVsSrc = `
+    attribute vec2 aPos;
+    void main() {
+      gl_Position = vec4(aPos, 0.0, 1.0);
+    }
+  `;
+
+  function setupAttribute(gl, prog) {
+    const aPos = gl.getAttribLocation(prog, 'aPos');
+    gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf);
+    gl.enableVertexAttribArray(aPos);
+    gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+  }
+
+  // ---- Preview canvas sizing ----
+  const PREVIEW_W = 240;
+  const PREVIEW_H = 135;
+  previewCanvas.width = PREVIEW_W;
+  previewCanvas.height = PREVIEW_H;
+
+  // ---- Programs & Uniforms ----
+  let previewGaborProgram = null;
+  let previewGaborUniforms = {};
+
+  function initPreviewGaborShader(fsSrc) {
+    if (previewGaborProgram) previewGl.deleteProgram(previewGaborProgram);
+    previewGaborProgram = createProgram(previewGl, previewVsSrc, fsSrc);
+    if (!previewGaborProgram) return false;
+
+    previewGl.useProgram(previewGaborProgram);
+    setupAttribute(previewGl, previewGaborProgram);
+
+    previewGaborUniforms = {
+      uResolution:   previewGl.getUniformLocation(previewGaborProgram, 'uResolution'),
+      uTime:         previewGl.getUniformLocation(previewGaborProgram, 'uTime'),
+      uFrequency:    previewGl.getUniformLocation(previewGaborProgram, 'uFrequency'),
+      uAmplitude:    previewGl.getUniformLocation(previewGaborProgram, 'uAmplitude'),
+      uSpeed:        previewGl.getUniformLocation(previewGaborProgram, 'uSpeed'),
+      uSigma:        previewGl.getUniformLocation(previewGaborProgram, 'uSigma'),
+      uOrientation:  previewGl.getUniformLocation(previewGaborProgram, 'uOrientation'),
+      uColor1:       previewGl.getUniformLocation(previewGaborProgram, 'uColor1'),
+      uColor2:       previewGl.getUniformLocation(previewGaborProgram, 'uColor2'),
+      uColor3:       previewGl.getUniformLocation(previewGaborProgram, 'uColor3'),
+      uKernelScale:  previewGl.getUniformLocation(previewGaborProgram, 'uKernelScale'),
+      uWarp:         previewGl.getUniformLocation(previewGaborProgram, 'uWarp'),
+      uTimeScale:    previewGl.getUniformLocation(previewGaborProgram, 'uTimeScale'),
+      uDensity:      previewGl.getUniformLocation(previewGaborProgram, 'uDensity'),
+      uRippleAmount: previewGl.getUniformLocation(previewGaborProgram, 'uRippleAmount'),
+      uRippleFreq:   previewGl.getUniformLocation(previewGaborProgram, 'uRippleFreq'),
+      uRippleSpeed:  previewGl.getUniformLocation(previewGaborProgram, 'uRippleSpeed'),
+    };
+    return true;
+  }
+
+  // ---- Default parameters ----
+  let sliderParams = {
+    frequency:     3.0,
+    amplitude:     1.2,
+    sigma:         0.9,
+    orientation:   0.6,
+    warp:          2.5,
+    rippleAmount:  0.15,
+    rippleFreq:    1.0,
+    rippleSpeed:   1.0,
+    glowIntensity: 0.35,
+    glowRadius:    0.5,
+    color1:        [1.0, 0.0, 0.0],
+    color2:        [0.0, 0.0, 0.0],
+    color3:        [0.486, 0.361, 0.988],
+  };
+
+  // For smooth interpolation
+  let displayParams = {};
+  // Copy initial values
+  for (const k in sliderParams) {
+    if (k === 'color1' || k === 'color2' || k === 'color3') {
+      displayParams[k] = [...sliderParams[k]];
+    } else {
+      displayParams[k] = sliderParams[k];
+    }
+  }
+
+  const LERP_FACTOR = 0.06;
+  const COLOR_LERP_FACTOR = 0.04;
+
+  // ---- Shader loading ----
+  let previewShaderReady = false;
+
+  fetch('gabor.frag')
+    .then(r => r.text())
+    .then(src => {
+      if (previewGl && !initPreviewGaborShader(src)) {
+        console.error('Preview shader compilation failed');
+        return;
+      }
+      previewShaderReady = true;
+    })
+    .catch(() => {
+      console.error('Failed to load gabor.frag for preview');
+    });
+
+  // ---- Render preview frame ----
+  let animStartTime = performance.now();
+
+  function renderPreview(time) {
+    if (!previewShaderReady || !previewGaborProgram) return;
+
+    // Interpolate display params towards slider params
+    for (const key in sliderParams) {
+      if (key === 'color1' || key === 'color2' || key === 'color3') {
+        displayParams[key][0] += (sliderParams[key][0] - displayParams[key][0]) * COLOR_LERP_FACTOR;
+        displayParams[key][1] += (sliderParams[key][1] - displayParams[key][1]) * COLOR_LERP_FACTOR;
+        displayParams[key][2] += (sliderParams[key][2] - displayParams[key][2]) * COLOR_LERP_FACTOR;
+      } else if (typeof sliderParams[key] === 'number') {
+        displayParams[key] += (sliderParams[key] - displayParams[key]) * LERP_FACTOR;
+      }
+    }
+
+    const time_s = (time - animStartTime) / 1000;
+
+    previewGl.viewport(0, 0, PREVIEW_W, PREVIEW_H);
+    previewGl.useProgram(previewGaborProgram);
+    setupAttribute(previewGl, previewGaborProgram);
+
+    previewGl.uniform2f(previewGaborUniforms.uResolution, PREVIEW_W, PREVIEW_H);
+    previewGl.uniform1f(previewGaborUniforms.uTime, time_s);
+    previewGl.uniform1f(previewGaborUniforms.uFrequency, displayParams.frequency);
+    previewGl.uniform1f(previewGaborUniforms.uAmplitude, displayParams.amplitude);
+    previewGl.uniform1f(previewGaborUniforms.uSpeed, 0.8);
+    previewGl.uniform1f(previewGaborUniforms.uSigma, displayParams.sigma);
+    previewGl.uniform1f(previewGaborUniforms.uOrientation, displayParams.orientation);
+    previewGl.uniform3fv(previewGaborUniforms.uColor1, displayParams.color1);
+    previewGl.uniform3fv(previewGaborUniforms.uColor2, displayParams.color2);
+    previewGl.uniform3fv(previewGaborUniforms.uColor3, displayParams.color3);
+    previewGl.uniform1f(previewGaborUniforms.uKernelScale, 6.0);
+    previewGl.uniform1f(previewGaborUniforms.uWarp, displayParams.warp);
+    previewGl.uniform1f(previewGaborUniforms.uTimeScale, 1.0);
+    previewGl.uniform1f(previewGaborUniforms.uDensity, 4.0);
+    previewGl.uniform1f(previewGaborUniforms.uRippleAmount, displayParams.rippleAmount);
+    previewGl.uniform1f(previewGaborUniforms.uRippleFreq, displayParams.rippleFreq);
+    previewGl.uniform1f(previewGaborUniforms.uRippleSpeed, displayParams.rippleSpeed);
+
+    previewGl.drawArrays(previewGl.TRIANGLES, 0, 6);
+  }
+
+  function previewLoop(time) {
+    renderPreview(time);
+    requestAnimationFrame(previewLoop);
+  }
+  requestAnimationFrame(previewLoop);
+
+  // ---- Capture snapshot for thumbnail ----
+  function captureThumbnail() {
+    // Render one frame with current target (not lerped) for a sharp thumbnail
+    const tempParams = {};
+    for (const k in sliderParams) {
+      if (k === 'color1' || k === 'color2' || k === 'color3') {
+        tempParams[k] = [...sliderParams[k]];
+      } else {
+        tempParams[k] = sliderParams[k];
+      }
+    }
+
+    // Temporarily set displayParams to exact target for capture
+    const saved = {};
+    for (const k in displayParams) {
+      if (k === 'color1' || k === 'color2' || k === 'color3') {
+        saved[k] = [...displayParams[k]];
+        displayParams[k] = [...tempParams[k]];
+      } else {
+        saved[k] = displayParams[k];
+        displayParams[k] = tempParams[k];
+      }
+    }
+
+    renderPreview(performance.now());
+
+    // Restore lerped state
+    for (const k in saved) {
+      displayParams[k] = saved[k];
+    }
+
+    return previewCanvas.toDataURL('image/jpeg', 0.85);
+  }
+
+  // ============================================================
+  //  Control Panel UI — WebSocket + Slider Logic
   // ============================================================
 
   // ---- WebSocket ----
@@ -215,6 +467,7 @@
   const connText = document.getElementById('connText');
   let ws = null;
   let reconnectTimer = null;
+
   function connectWS() {
     const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const url = `${proto}//${window.location.host}`;
@@ -240,16 +493,13 @@
     ws.onmessage = (e) => {
       try {
         const msg = JSON.parse(e.data);
-        if (msg.type === 'pong') {
-          // keep-alive received
-        }
+        if (msg.type === 'pong') {}
       } catch(err) {}
     };
   }
 
   function sendParams() {
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
-
     const data = getParams();
     ws.send(JSON.stringify({ type: 'params', data }));
   }
@@ -273,12 +523,48 @@
     };
   }
 
+  // ---- Update sliderParams from UI ----
+  function readSliderParamsFromUI() {
+    sliderParams.frequency     = parseFloat(document.getElementById('frequency').value);
+    sliderParams.amplitude     = parseFloat(document.getElementById('amplitude').value);
+    sliderParams.sigma         = parseFloat(document.getElementById('sigma').value);
+    sliderParams.orientation   = parseFloat(document.getElementById('orientation').value);
+    sliderParams.warp          = parseFloat(document.getElementById('warp').value);
+    sliderParams.rippleAmount  = parseFloat(document.getElementById('rippleAmount').value);
+    sliderParams.rippleFreq    = parseFloat(document.getElementById('rippleFreq').value);
+    sliderParams.rippleSpeed   = parseFloat(document.getElementById('rippleSpeed').value);
+    sliderParams.glowIntensity = parseFloat(document.getElementById('glowIntensity').value);
+    sliderParams.glowRadius    = parseFloat(document.getElementById('glowRadius').value);
+    sliderParams.color1        = hexToRGB(document.getElementById('color1').value);
+    sliderParams.color2        = hexToRGB(document.getElementById('color2').value);
+    sliderParams.color3        = hexToRGB(document.getElementById('color3').value);
+  }
+
   // ---- Hex to RGB normalized ----
   function hexToRGB(hex) {
     const r = parseInt(hex.slice(1, 3), 16) / 255;
     const g = parseInt(hex.slice(3, 5), 16) / 255;
     const b = parseInt(hex.slice(5, 7), 16) / 255;
     return [r, g, b];
+  }
+
+  // ---- RGB to hex ----
+  function rgbToHex(rgb) {
+    const r = Math.round(rgb[0] * 255).toString(16).padStart(2, '0');
+    const g = Math.round(rgb[1] * 255).toString(16).padStart(2, '0');
+    const b = Math.round(rgb[2] * 255).toString(16).padStart(2, '0');
+    return `#${r}${g}${b}`;
+  }
+
+  // ---- Snap displayParams to sliderParams for instant preview feedback ----
+  function snapDisplayParams() {
+    for (const k in sliderParams) {
+      if (k === 'color1' || k === 'color2' || k === 'color3') {
+        displayParams[k] = [...sliderParams[k]];
+      } else {
+        displayParams[k] = sliderParams[k];
+      }
+    }
   }
 
   // ---- Bind slider ----
@@ -289,6 +575,8 @@
     slider.addEventListener('input', () => {
       const v = parseFloat(slider.value);
       valEl.textContent = v.toFixed(decimals);
+      readSliderParamsFromUI();
+      snapDisplayParams();  // instant preview feedback for manual changes
       sendParams();
     });
   }
@@ -311,6 +599,8 @@
 
     picker.addEventListener('input', () => {
       hexLabel.textContent = picker.value;
+      readSliderParamsFromUI();
+      snapDisplayParams();  // instant preview feedback for manual color changes
       sendParams();
     });
   }
@@ -332,7 +622,7 @@
   });
 
   // ============================================================
-  //  User Presets (localStorage)
+  //  User Presets (localStorage) — Visual Grid with Thumbnails
   // ============================================================
 
   const STORAGE_KEY = 'gabor-noise-presets';
@@ -347,37 +637,87 @@
     localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
   }
 
-  function refreshPresetSelect() {
-    const select = document.getElementById('presetSelect');
+  let selectedPreset = null;
+
+  // ---- Render the preset thumbnail grid ----
+  function renderPresetGrid() {
+    const grid = document.getElementById('presetGrid');
     const list = loadPresetList();
-    select.innerHTML = '<option value="">— Seleccionar preset —</option>';
-    Object.keys(list).sort().forEach(name => {
-      const opt = document.createElement('option');
-      opt.value = name;
-      opt.textContent = name;
-      select.appendChild(opt);
+    const count = Object.keys(list).length;
+
+    document.getElementById('presetCount').textContent = count;
+
+    if (count === 0) {
+      grid.innerHTML = '<div class="preset-empty">Aún no hay presets guardados. Ajusta los controles y guarda tu primer preset.</div>';
+      document.getElementById('presetActions').style.display = 'none';
+      return;
+    }
+
+    grid.innerHTML = '';
+
+    const names = Object.keys(list).sort();
+    names.forEach(name => {
+      const preset = list[name];
+      const card = document.createElement('div');
+      card.className = 'preset-card';
+      card.dataset.name = name;
+
+      if (selectedPreset === name) {
+        card.classList.add('selected');
+      }
+
+      // Thumbnail
+      const thumb = document.createElement('img');
+      thumb.className = 'preset-thumb';
+      if (preset.thumbnail) {
+        thumb.src = preset.thumbnail;
+      } else {
+        // Placeholder gradient based on colors
+        const c1 = preset.color1 || '#ff0000';
+        const c2 = preset.color2 || '#000000';
+        thumb.style.background = `linear-gradient(135deg, ${c1}, ${c2})`;
+        thumb.style.opacity = '0.6';
+      }
+      thumb.alt = name;
+      thumb.loading = 'lazy';
+      card.appendChild(thumb);
+
+      // Name label
+      const label = document.createElement('div');
+      label.className = 'preset-name';
+      label.textContent = name;
+      card.appendChild(label);
+
+      // Delete button (shown on hover)
+      const delBtn = document.createElement('button');
+      delBtn.className = 'preset-delete-btn';
+      delBtn.title = 'Eliminar preset';
+      delBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 6L6 18M6 6l12 12"/></svg>';
+      delBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        deletePreset(name);
+      });
+      card.appendChild(delBtn);
+
+      // Click to load
+      card.addEventListener('click', () => {
+        loadPreset(name);
+      });
+
+      grid.appendChild(card);
     });
+
+    if (selectedPreset && names.includes(selectedPreset)) {
+      document.getElementById('presetActions').style.display = 'flex';
+      document.getElementById('selectedLabel').textContent = `«${selectedPreset}»`;
+    } else {
+      document.getElementById('presetActions').style.display = 'none';
+    }
   }
 
-  function captureCurrentState() {
-    return {
-      frequency:     document.getElementById('frequency').value,
-      amplitude:     document.getElementById('amplitude').value,
-      sigma:         document.getElementById('sigma').value,
-      orientation:   document.getElementById('orientation').value,
-      warp:          document.getElementById('warp').value,
-      rippleAmount:  document.getElementById('rippleAmount').value,
-      rippleFreq:    document.getElementById('rippleFreq').value,
-      rippleSpeed:   document.getElementById('rippleSpeed').value,
-      glowIntensity: document.getElementById('glowIntensity').value,
-      glowRadius:    document.getElementById('glowRadius').value,
-      color1:        document.getElementById('color1').value,
-      color2:        document.getElementById('color2').value,
-      color3:        document.getElementById('color3').value,
-    };
-  }
-
-  function applyState(state) {
+  // ---- Apply preset state to UI controls ----
+  function applyState(state, animate) {
+    // Update all slider/color values
     document.getElementById('frequency').value     = state.frequency;
     document.getElementById('amplitude').value     = state.amplitude;
     document.getElementById('sigma').value         = state.sigma;
@@ -407,47 +747,205 @@
     document.getElementById('color2Hex').textContent = state.color2;
     document.getElementById('color3Hex').textContent = state.color3;
 
+    // Update sliderParams for the WebGL preview
+    readSliderParamsFromUI();
+
+    // If not animating, snap displayParams instantly
+    if (!animate) {
+      for (const k in sliderParams) {
+        if (k === 'color1' || k === 'color2' || k === 'color3') {
+          displayParams[k] = [...sliderParams[k]];
+        } else {
+          displayParams[k] = sliderParams[k];
+        }
+      }
+    }
+    // If animating, the render loop will lerp towards the new values
+
     sendParams();
   }
 
-  // ---- Save ----
+  // ---- Capture current state from UI ----
+  function captureCurrentState() {
+    return {
+      frequency:     document.getElementById('frequency').value,
+      amplitude:     document.getElementById('amplitude').value,
+      sigma:         document.getElementById('sigma').value,
+      orientation:   document.getElementById('orientation').value,
+      warp:          document.getElementById('warp').value,
+      rippleAmount:  document.getElementById('rippleAmount').value,
+      rippleFreq:    document.getElementById('rippleFreq').value,
+      rippleSpeed:   document.getElementById('rippleSpeed').value,
+      glowIntensity: document.getElementById('glowIntensity').value,
+      glowRadius:    document.getElementById('glowRadius').value,
+      color1:        document.getElementById('color1').value,
+      color2:        document.getElementById('color2').value,
+      color3:        document.getElementById('color3').value,
+    };
+  }
+
+  // ---- Load a preset ----
+  function loadPreset(name) {
+    const list = loadPresetList();
+    const state = list[name];
+    if (!state) return;
+
+    selectedPreset = name;
+
+    // Generate thumbnail if missing
+    if (!state.thumbnail) {
+      state.thumbnail = generateThumbnailForPreset(state);
+      list[name] = state;
+      savePresetList(list);
+    }
+
+    // Apply with smooth transition — let the render loop lerp displayParams
+    // so the preview canvas cross-fades into the new preset
+    applyState(state, true);
+
+    renderPresetGrid();
+
+    // Add a visual flash effect to the preview canvas
+    previewCanvas.classList.remove('preset-flash');
+    void previewCanvas.offsetHeight; // trigger reflow
+    previewCanvas.classList.add('preset-flash');
+  }
+
+  // ---- Generate thumbnail for a given preset state ----
+  function generateThumbnailForPreset(state) {
+    if (!previewShaderReady) return null;
+
+    // Save current preview state
+    const savedSlider = {};
+    for (const k in sliderParams) {
+      if (k === 'color1' || k === 'color2' || k === 'color3') {
+        savedSlider[k] = [...sliderParams[k]];
+      } else {
+        savedSlider[k] = sliderParams[k];
+      }
+    }
+    const savedDisplay = {};
+    for (const k in displayParams) {
+      if (k === 'color1' || k === 'color2' || k === 'color3') {
+        savedDisplay[k] = [...displayParams[k]];
+      } else {
+        savedDisplay[k] = displayParams[k];
+      }
+    }
+
+    // Set to preset values (convert hex to RGB)
+    const colors = {
+      color1: hexToRGB(state.color1),
+      color2: hexToRGB(state.color2),
+      color3: hexToRGB(state.color3),
+    };
+
+    for (const k in state) {
+      if (k === 'color1' || k === 'color2' || k === 'color3') {
+        sliderParams[k] = colors[k];
+        displayParams[k] = [...colors[k]];
+      } else if (k !== 'thumbnail' && typeof state[k] !== 'undefined') {
+        sliderParams[k] = parseFloat(state[k]);
+        displayParams[k] = parseFloat(state[k]);
+      }
+    }
+
+    // Render two frames to ensure shader settles
+    renderPreview(performance.now());
+    renderPreview(performance.now() + 16);
+
+    const dataUrl = previewCanvas.toDataURL('image/jpeg', 0.85);
+
+    // Restore saved state
+    for (const k in savedSlider) {
+      sliderParams[k] = savedSlider[k];
+    }
+    for (const k in savedDisplay) {
+      displayParams[k] = savedDisplay[k];
+    }
+
+    return dataUrl;
+  }
+
+  // ---- Generate thumbnails for presets that don't have them ----
+  function generateMissingThumbnails() {
+    if (!previewShaderReady) return;
+    const list = loadPresetList();
+    let changed = false;
+    for (const name in list) {
+      if (!list[name].thumbnail) {
+        const thumb = generateThumbnailForPreset(list[name]);
+        if (thumb) {
+          list[name].thumbnail = thumb;
+          changed = true;
+        }
+      }
+    }
+    if (changed) {
+      savePresetList(list);
+      renderPresetGrid();
+    }
+  }
+
+  // ---- Save a new preset ----
   document.getElementById('savePresetBtn').addEventListener('click', () => {
-    const name = document.getElementById('presetName').value.trim();
+    const nameInput = document.getElementById('presetName');
+    const name = nameInput.value.trim();
     if (!name) { alert('Escribe un nombre para el preset'); return; }
 
     const list = loadPresetList();
-    list[name] = captureCurrentState();
+
+    // Capture current state
+    const state = captureCurrentState();
+
+    // Generate thumbnail from current preview
+    const thumb = captureThumbnail();
+    if (thumb) state.thumbnail = thumb;
+
+    list[name] = state;
     savePresetList(list);
-    refreshPresetSelect();
-    document.getElementById('presetName').value = '';
+    selectedPreset = name;
+    renderPresetGrid();
+    nameInput.value = '';
+
+    // Flash feedback
+    previewCanvas.classList.remove('preset-flash');
+    void previewCanvas.offsetHeight;
+    previewCanvas.classList.add('preset-flash');
   });
 
-  // ---- Load ----
-  document.getElementById('loadPresetBtn').addEventListener('click', () => {
-    const select = document.getElementById('presetSelect');
-    const name = select.value;
-    if (!name) { alert('Selecciona un preset de la lista'); return; }
-
-    const list = loadPresetList();
-    const state = list[name];
-    if (state) applyState(state);
-  });
-
-  // ---- Delete ----
-  document.getElementById('deletePresetBtn').addEventListener('click', () => {
-    const select = document.getElementById('presetSelect');
-    const name = select.value;
-    if (!name) { alert('Selecciona un preset de la lista'); return; }
+  // ---- Delete a preset ----
+  function deletePreset(name) {
     if (!confirm(`¿Eliminar preset "${name}"?`)) return;
-
     const list = loadPresetList();
     delete list[name];
     savePresetList(list);
-    refreshPresetSelect();
+    if (selectedPreset === name) selectedPreset = null;
+    renderPresetGrid();
+  }
+
+  document.getElementById('deletePresetBtn').addEventListener('click', () => {
+    if (!selectedPreset) return;
+    deletePreset(selectedPreset);
   });
 
-  // ---- Init preset dropdown ----
-  refreshPresetSelect();
+  // ---- Allow Enter key to save ----
+  document.getElementById('presetName').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      document.getElementById('savePresetBtn').click();
+    }
+  });
+
+  // ---- Init ----
+  renderPresetGrid();
+
+  // Generate thumbnails for existing presets after shader is ready
+  const thumbCheckInterval = setInterval(() => {
+    if (previewShaderReady) {
+      clearInterval(thumbCheckInterval);
+      generateMissingThumbnails();
+    }
+  }, 200);
 
   // ---- Connect WebSocket ----
   connectWS();

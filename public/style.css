@@ -357,3 +357,204 @@ input[type="range"]::-moz-range-thumb {
 .slider-wrap {
   padding: 2px 0;
 }
+
+/* ===== Preview Canvas ===== */
+.preview-canvas {
+  width: 160px;
+  height: 90px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: #000;
+  flex-shrink: 0;
+  transition: box-shadow 0.3s, border-color 0.3s;
+}
+
+.preview-canvas.preset-flash {
+  border-color: var(--accent);
+  box-shadow: 0 0 20px rgba(124, 92, 252, 0.4);
+}
+
+/* ===== Save Area ===== */
+.save-area {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.save-form {
+  flex: 1;
+  display: flex;
+  gap: 8px;
+}
+
+.save-form input {
+  flex: 1;
+  min-width: 120px;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  color: var(--text-primary);
+  font-size: 13px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.save-form input:focus {
+  border-color: var(--accent);
+}
+
+.save-btn {
+  background: var(--accent) !important;
+  color: #fff !important;
+  border: none !important;
+  white-space: nowrap;
+}
+
+.save-btn:hover {
+  background: var(--accent-hover) !important;
+}
+
+/* ===== Preset Thumbnail Grid ===== */
+.preset-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.preset-card {
+  position: relative;
+  background: var(--bg-card);
+  border: 2px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  cursor: pointer;
+  transition: all 0.25s ease;
+  user-select: none;
+}
+
+.preset-card:hover {
+  border-color: var(--accent);
+  transform: translateY(-3px);
+  box-shadow: 0 8px 24px rgba(124, 92, 252, 0.2);
+}
+
+.preset-card:active {
+  transform: translateY(0) scale(0.97);
+}
+
+.preset-card.selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent), 0 4px 16px rgba(124, 92, 252, 0.25);
+}
+
+.preset-thumb {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  display: block;
+  background: var(--bg-secondary);
+  transition: opacity 0.3s;
+}
+
+.preset-name {
+  padding: 8px 10px 7px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  border-top: 1px solid var(--border);
+}
+
+.preset-delete-btn {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.7);
+  color: var(--red);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.2s, background 0.2s, transform 0.15s;
+  backdrop-filter: blur(4px);
+}
+
+.preset-card:hover .preset-delete-btn {
+  opacity: 1;
+}
+
+.preset-delete-btn:hover {
+  background: rgba(248, 113, 113, 0.3);
+  transform: scale(1.15);
+}
+
+/* ===== Preset Actions ===== */
+.preset-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
+  padding: 0 4px;
+}
+
+.delete-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--red) !important;
+  border-color: rgba(248, 113, 113, 0.3) !important;
+}
+
+.delete-btn:hover {
+  border-color: var(--red) !important;
+  background: rgba(248, 113, 113, 0.1) !important;
+}
+
+.preset-selected-label {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.preset-count {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-muted);
+  background: var(--bg-card);
+  padding: 2px 8px;
+  border-radius: 10px;
+  margin-left: 8px;
+}
+
+.preset-empty {
+  grid-column: 1 / -1;
+  text-align: center;
+  padding: 28px 16px;
+  color: var(--text-muted);
+  font-size: 13px;
+  background: var(--bg-card);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+}
+
+/* ===== Responsive tweaks ===== */
+@media (max-width: 640px) {
+  .save-area {
+    flex-direction: column;
+  }
+  .save-form {
+    width: 100%;
+  }
+  .preset-grid {
+    grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  }
+}
