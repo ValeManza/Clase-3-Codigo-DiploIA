@@ -381,8 +381,19 @@ input[type="range"]::-moz-range-thumb {
   gap: 16px;
 }
 
-.save-form {
+.save-controls {
   flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.save-form {
+  display: flex;
+  gap: 8px;
+}
+
+.io-actions {
   display: flex;
   gap: 8px;
 }
@@ -413,6 +424,31 @@ input[type="range"]::-moz-range-thumb {
 
 .save-btn:hover {
   background: var(--accent-hover) !important;
+}
+
+.export-btn {
+  background: transparent !important;
+  color: var(--accent) !important;
+  border-color: var(--accent) !important;
+  white-space: nowrap;
+}
+
+.export-btn:hover {
+  background: var(--accent-glow) !important;
+  transform: translateY(-1px);
+}
+
+.import-btn {
+  background: transparent !important;
+  color: var(--green) !important;
+  border-color: rgba(74, 222, 128, 0.4) !important;
+  white-space: nowrap;
+}
+
+.import-btn:hover {
+  background: rgba(74, 222, 128, 0.1) !important;
+  border-color: var(--green) !important;
+  transform: translateY(-1px);
 }
 
 /* ===== Preset Thumbnail Grid ===== */
@@ -546,6 +582,94 @@ input[type="range"]::-moz-range-thumb {
   border-radius: var(--radius-sm);
 }
 
+/* =============================================
+   Color Palette Swatches
+   ============================================= */
+
+.palette-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.palette-swatch {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px;
+  background: var(--bg-input);
+  border: 2px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  min-width: 70px;
+}
+
+.palette-swatch:hover {
+  border-color: var(--accent);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(124, 92, 252, 0.2);
+}
+
+.palette-swatch:active {
+  transform: translateY(0) scale(0.96);
+}
+
+.palette-swatch-colors {
+  display: flex;
+  gap: 2px;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.palette-swatch-colors span {
+  display: block;
+  width: 18px;
+  height: 18px;
+  border-radius: 2px;
+}
+
+.palette-swatch-name {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+/* =============================================
+   Brightness / Contrast Presets
+   ============================================= */
+
+.bc-preset-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.bc-preset-btn {
+  padding: 8px 16px;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  background: var(--bg-input);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.bc-preset-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-glow);
+  transform: translateY(-1px);
+}
+
+.bc-preset-btn:active {
+  transform: translateY(0) scale(0.97);
+}
+
 /* ===== Responsive tweaks ===== */
 @media (max-width: 640px) {
   .save-area {
@@ -553,6 +677,12 @@ input[type="range"]::-moz-range-thumb {
   }
   .save-form {
     width: 100%;
+  }
+  .io-actions {
+    width: 100%;
+  }
+  .io-actions .btn-preset {
+    flex: 1;
   }
   .preset-grid {
     grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));

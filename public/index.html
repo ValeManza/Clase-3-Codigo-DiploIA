@@ -175,23 +175,66 @@
         </div>
       </div>
 
+      <div class="card">
+        <div class="control-label">
+          <span>Brillo</span>
+          <span class="control-value" id="brightnessVal">1.00</span>
+        </div>
+        <div class="slider-wrap">
+          <input type="range" id="brightness" min="0.2" max="2.0" step="0.05" value="1.0" />
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="control-label">
+          <span>Contraste</span>
+          <span class="control-value" id="contrastVal">1.00</span>
+        </div>
+        <div class="slider-wrap">
+          <input type="range" id="contrast" min="0.2" max="3.0" step="0.05" value="1.0" />
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ===== Color Palettes Section ===== -->
+  <div class="section">
+    <div class="section-title">Paletas de Color</div>
+    <div class="card card-full">
+      <div class="palette-grid" id="paletteGrid"></div>
+    </div>
+  </div>
+
+  <!-- ===== Brightness/Contrast Presets ===== -->
+  <div class="section">
+    <div class="section-title">Ajustes Predefinidos</div>
+    <div class="card card-full">
+      <div class="bc-preset-grid" id="bcPresetGrid"></div>
     </div>
   </div>
 
   <!-- ===== User Presets Section ===== -->
   <div class="section">
     <div class="section-title">
-      Mis Presets
+      Presets Públicos
       <span class="preset-count" id="presetCount">0</span>
     </div>
 
-    <!-- Save controls with live preview -->
+    <!-- Save / Export controls with live preview -->
     <div class="card card-full">
       <div class="save-area">
         <canvas id="previewCanvas" class="preview-canvas"></canvas>
-        <div class="save-form">
-          <input type="text" id="presetName" placeholder="Nombre del nuevo preset..." />
-          <button class="btn-preset save-btn" id="savePresetBtn">Guardar como</button>
+        <div class="save-controls">
+          <div class="save-form">
+            <input type="text" id="presetName" placeholder="Nombre del nuevo preset..." />
+            <button class="btn-preset save-btn" id="savePresetBtn">Guardar como</button>
+          </div>
+          <div class="io-actions">
+            <button class="btn-preset export-btn" id="exportPresetsBtn">📥 Exportar</button>
+            <button class="btn-preset import-btn" id="importPresetsBtn">📂 Importar</button>
+            <input type="file" id="importFileInput" accept=".json" style="display:none" />
+          </div>
         </div>
       </div>
     </div>
@@ -323,6 +366,8 @@
       uRippleAmount: previewGl.getUniformLocation(previewGaborProgram, 'uRippleAmount'),
       uRippleFreq:   previewGl.getUniformLocation(previewGaborProgram, 'uRippleFreq'),
       uRippleSpeed:  previewGl.getUniformLocation(previewGaborProgram, 'uRippleSpeed'),
+      uBrightness:   previewGl.getUniformLocation(previewGaborProgram, 'uBrightness'),
+      uContrast:     previewGl.getUniformLocation(previewGaborProgram, 'uContrast'),
     };
     return true;
   }
@@ -339,6 +384,8 @@
     rippleSpeed:   1.0,
     glowIntensity: 0.35,
     glowRadius:    0.5,
+    brightness:    1.0,
+    contrast:      1.0,
     color1:        [1.0, 0.0, 0.0],
     color2:        [0.0, 0.0, 0.0],
     color3:        [0.486, 0.361, 0.988],
@@ -414,6 +461,8 @@
     previewGl.uniform1f(previewGaborUniforms.uRippleAmount, displayParams.rippleAmount);
     previewGl.uniform1f(previewGaborUniforms.uRippleFreq, displayParams.rippleFreq);
     previewGl.uniform1f(previewGaborUniforms.uRippleSpeed, displayParams.rippleSpeed);
+    previewGl.uniform1f(previewGaborUniforms.uBrightness, displayParams.brightness);
+    previewGl.uniform1f(previewGaborUniforms.uContrast, displayParams.contrast);
 
     previewGl.drawArrays(previewGl.TRIANGLES, 0, 6);
   }
@@ -517,6 +566,8 @@
       rippleSpeed:   parseFloat(document.getElementById('rippleSpeed').value),
       glowIntensity: parseFloat(document.getElementById('glowIntensity').value),
       glowRadius:    parseFloat(document.getElementById('glowRadius').value),
+      brightness:    parseFloat(document.getElementById('brightness').value),
+      contrast:      parseFloat(document.getElementById('contrast').value),
       color1:        hexToRGB(document.getElementById('color1').value),
       color2:        hexToRGB(document.getElementById('color2').value),
       color3:        hexToRGB(document.getElementById('color3').value),
@@ -535,6 +586,8 @@
     sliderParams.rippleSpeed   = parseFloat(document.getElementById('rippleSpeed').value);
     sliderParams.glowIntensity = parseFloat(document.getElementById('glowIntensity').value);
     sliderParams.glowRadius    = parseFloat(document.getElementById('glowRadius').value);
+    sliderParams.brightness    = parseFloat(document.getElementById('brightness').value);
+    sliderParams.contrast      = parseFloat(document.getElementById('contrast').value);
     sliderParams.color1        = hexToRGB(document.getElementById('color1').value);
     sliderParams.color2        = hexToRGB(document.getElementById('color2').value);
     sliderParams.color3        = hexToRGB(document.getElementById('color3').value);
@@ -591,6 +644,8 @@
   bindSlider('rippleSpeed', 'rippleSpeedVal',  2);
   bindSlider('glowIntensity','glowIntensityVal',2);
   bindSlider('glowRadius',   'glowRadiusVal',   2);
+  bindSlider('brightness',   'brightnessVal',   2);
+  bindSlider('contrast',     'contrastVal',     2);
 
   // ---- Bind color pickers ----
   function bindColorPicker(id, hexId) {
@@ -622,19 +677,124 @@
   });
 
   // ============================================================
-  //  User Presets (localStorage) — Visual Grid with Thumbnails
+  //  Color Palette Presets
   // ============================================================
 
-  const STORAGE_KEY = 'gabor-noise-presets';
+  const COLOR_PALETTES = [
+    { name: 'Fuego',     c1: '#ff2200', c2: '#ff6600', c3: '#ffcc00' },
+    { name: 'Océano',    c1: '#001133', c2: '#0066aa', c3: '#00ccff' },
+    { name: 'Neón',      c1: '#ff00aa', c2: '#7c5cfc', c3: '#00ffcc' },
+    { name: 'Atardecer', c1: '#6b21a8', c2: '#ea580c', c3: '#fbbf24' },
+    { name: 'Bosque',    c1: '#064e3b', c2: '#059669', c3: '#a3e635' },
+    { name: 'Hielo',     c1: '#1e3a5f', c2: '#7dd3fc', c3: '#e0f2fe' },
+    { name: 'Lava',      c1: '#7f1d1d', c2: '#dc2626', c3: '#f97316' },
+    { name: 'Oscuro',    c1: '#000000', c2: '#1e1b4b', c3: '#312e81' },
+    { name: 'Oro',       c1: '#451a03', c2: '#b45309', c3: '#fef3c7' },
+  ];
 
-  function loadPresetList() {
-    try {
-      return JSON.parse(localStorage.getItem(STORAGE_KEY)) || {};
-    } catch { return {}; }
+  function initColorPalettes() {
+    const grid = document.getElementById('paletteGrid');
+    grid.innerHTML = '';
+    COLOR_PALETTES.forEach(p => {
+      const swatch = document.createElement('button');
+      swatch.className = 'palette-swatch';
+      swatch.title = p.name;
+      swatch.innerHTML = `
+        <span class="palette-swatch-colors">
+          <span style="background:${p.c1}"></span>
+          <span style="background:${p.c2}"></span>
+          <span style="background:${p.c3}"></span>
+        </span>
+        <span class="palette-swatch-name">${p.name}</span>
+      `;
+      swatch.addEventListener('click', () => {
+        document.getElementById('color1').value = p.c1;
+        document.getElementById('color2').value = p.c2;
+        document.getElementById('color3').value = p.c3;
+        document.getElementById('color1Hex').textContent = p.c1;
+        document.getElementById('color2Hex').textContent = p.c2;
+        document.getElementById('color3Hex').textContent = p.c3;
+        readSliderParamsFromUI();
+        snapDisplayParams();
+        sendParams();
+      });
+      grid.appendChild(swatch);
+    });
   }
 
-  function savePresetList(list) {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
+  // ============================================================
+  //  Brightness / Contrast Presets
+  // ============================================================
+
+  const BC_PRESETS = [
+    { name: 'Normal',         b: '1.00', c: '1.00' },
+    { name: 'Brillante',      b: '1.30', c: '1.20' },
+    { name: 'Alto Contraste', b: '1.00', c: '1.80' },
+    { name: 'Oscuro',         b: '0.70', c: '1.30' },
+    { name: 'Suave',          b: '1.10', c: '0.80' },
+    { name: 'Vívido',         b: '1.25', c: '1.50' },
+    { name: 'Opaco',          b: '0.85', c: '0.70' },
+    { name: 'Saturado',       b: '1.40', c: '2.00' },
+  ];
+
+  function initBCPresets() {
+    const grid = document.getElementById('bcPresetGrid');
+    grid.innerHTML = '';
+    BC_PRESETS.forEach(p => {
+      const btn = document.createElement('button');
+      btn.className = 'bc-preset-btn';
+      btn.textContent = p.name;
+      btn.dataset.brightness = p.b;
+      btn.dataset.contrast = p.c;
+      btn.addEventListener('click', () => {
+        document.getElementById('brightness').value = p.b;
+        document.getElementById('contrast').value = p.c;
+        document.getElementById('brightnessVal').textContent = parseFloat(p.b).toFixed(2);
+        document.getElementById('contrastVal').textContent = parseFloat(p.c).toFixed(2);
+        readSliderParamsFromUI();
+        snapDisplayParams();
+        sendParams();
+      });
+      grid.appendChild(btn);
+    });
+  }
+
+  // ============================================================
+  //  User Presets (API) — Visual Grid with Thumbnails
+  // ============================================================
+
+  let presetCache = {};
+
+  async function loadPresetList() {
+    try {
+      const res = await fetch('/api/presets');
+      if (res.ok) {
+        presetCache = await res.json();
+      }
+    } catch {}
+    return presetCache;
+  }
+
+  async function savePresetOnServer(name, data) {
+    try {
+      await fetch('/api/presets', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, data })
+      });
+      presetCache[name] = data;
+    } catch (err) {
+      console.error('Error saving preset:', err);
+    }
+  }
+
+  async function deletePresetOnServer(name) {
+    try {
+      await fetch('/api/presets/' + encodeURIComponent(name), { method: 'DELETE' });
+      delete presetCache[name];
+    } catch (err) {
+      console.error('Error deleting preset:', err);
+    }
   }
 
   let selectedPreset = null;
@@ -642,13 +802,13 @@
   // ---- Render the preset thumbnail grid ----
   function renderPresetGrid() {
     const grid = document.getElementById('presetGrid');
-    const list = loadPresetList();
+    const list = presetCache;
     const count = Object.keys(list).length;
 
     document.getElementById('presetCount').textContent = count;
 
     if (count === 0) {
-      grid.innerHTML = '<div class="preset-empty">Aún no hay presets guardados. Ajusta los controles y guarda tu primer preset.</div>';
+      grid.innerHTML = '<div class="preset-empty">Aún no hay presets. Los presets por defecto se cargarán al iniciar el servidor.</div>';
       document.getElementById('presetActions').style.display = 'none';
       return;
     }
@@ -728,6 +888,8 @@
     document.getElementById('rippleSpeed').value   = state.rippleSpeed;
     document.getElementById('glowIntensity').value = state.glowIntensity;
     document.getElementById('glowRadius').value    = state.glowRadius;
+    document.getElementById('brightness').value    = state.brightness;
+    document.getElementById('contrast').value      = state.contrast;
     document.getElementById('color1').value        = state.color1;
     document.getElementById('color2').value        = state.color2;
     document.getElementById('color3').value        = state.color3;
@@ -743,6 +905,8 @@
     document.getElementById('rippleSpeedVal').textContent   = parseFloat(state.rippleSpeed).toFixed(2);
     document.getElementById('glowIntensityVal').textContent = parseFloat(state.glowIntensity).toFixed(2);
     document.getElementById('glowRadiusVal').textContent    = parseFloat(state.glowRadius).toFixed(2);
+    document.getElementById('brightnessVal').textContent    = parseFloat(state.brightness).toFixed(2);
+    document.getElementById('contrastVal').textContent      = parseFloat(state.contrast).toFixed(2);
     document.getElementById('color1Hex').textContent = state.color1;
     document.getElementById('color2Hex').textContent = state.color2;
     document.getElementById('color3Hex').textContent = state.color3;
@@ -778,6 +942,8 @@
       rippleSpeed:   document.getElementById('rippleSpeed').value,
       glowIntensity: document.getElementById('glowIntensity').value,
       glowRadius:    document.getElementById('glowRadius').value,
+      brightness:    document.getElementById('brightness').value,
+      contrast:      document.getElementById('contrast').value,
       color1:        document.getElementById('color1').value,
       color2:        document.getElementById('color2').value,
       color3:        document.getElementById('color3').value,
@@ -785,18 +951,20 @@
   }
 
   // ---- Load a preset ----
-  function loadPreset(name) {
-    const list = loadPresetList();
+  async function loadPreset(name) {
+    const list = presetCache;
     const state = list[name];
     if (!state) return;
 
     selectedPreset = name;
 
-    // Generate thumbnail if missing
+    // Generate thumbnail if missing (async, doesn't block)
     if (!state.thumbnail) {
       state.thumbnail = generateThumbnailForPreset(state);
-      list[name] = state;
-      savePresetList(list);
+      if (state.thumbnail) {
+        list[name] = state;
+        await savePresetOnServer(name, state);
+      }
     }
 
     // Apply with smooth transition — let the render loop lerp displayParams
@@ -868,9 +1036,9 @@
   }
 
   // ---- Generate thumbnails for presets that don't have them ----
-  function generateMissingThumbnails() {
+  async function generateMissingThumbnails() {
     if (!previewShaderReady) return;
-    const list = loadPresetList();
+    const list = presetCache;
     let changed = false;
     for (const name in list) {
       if (!list[name].thumbnail) {
@@ -882,18 +1050,20 @@
       }
     }
     if (changed) {
-      savePresetList(list);
+      for (const name in list) {
+        if (list[name].thumbnail) {
+          await savePresetOnServer(name, list[name]);
+        }
+      }
       renderPresetGrid();
     }
   }
 
   // ---- Save a new preset ----
-  document.getElementById('savePresetBtn').addEventListener('click', () => {
+  document.getElementById('savePresetBtn').addEventListener('click', async () => {
     const nameInput = document.getElementById('presetName');
     const name = nameInput.value.trim();
     if (!name) { alert('Escribe un nombre para el preset'); return; }
-
-    const list = loadPresetList();
 
     // Capture current state
     const state = captureCurrentState();
@@ -902,8 +1072,7 @@
     const thumb = captureThumbnail();
     if (thumb) state.thumbnail = thumb;
 
-    list[name] = state;
-    savePresetList(list);
+    await savePresetOnServer(name, state);
     selectedPreset = name;
     renderPresetGrid();
     nameInput.value = '';
@@ -915,11 +1084,9 @@
   });
 
   // ---- Delete a preset ----
-  function deletePreset(name) {
+  async function deletePreset(name) {
     if (!confirm(`¿Eliminar preset "${name}"?`)) return;
-    const list = loadPresetList();
-    delete list[name];
-    savePresetList(list);
+    await deletePresetOnServer(name);
     if (selectedPreset === name) selectedPreset = null;
     renderPresetGrid();
   }
@@ -936,16 +1103,135 @@
     }
   });
 
-  // ---- Init ----
-  renderPresetGrid();
+  // ---- Export presets as JSON file ----
+  document.getElementById('exportPresetsBtn').addEventListener('click', async () => {
+    try {
+      const res = await fetch('/api/presets');
+      if (!res.ok) { alert('Error al obtener los presets'); return; }
+      const presets = await res.json();
 
-  // Generate thumbnails for existing presets after shader is ready
-  const thumbCheckInterval = setInterval(() => {
-    if (previewShaderReady) {
-      clearInterval(thumbCheckInterval);
-      generateMissingThumbnails();
+      // Clean thumbnail data URLs to keep file small
+      const clean = {};
+      for (const [name, data] of Object.entries(presets)) {
+        const { thumbnail, ...rest } = data;
+        clean[name] = rest;
+      }
+
+      const blob = new Blob(
+        [JSON.stringify(clean, null, 2)],
+        { type: 'application/json' }
+      );
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'gabor-presets.json';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Error exporting presets:', err);
+      alert('Error al exportar los presets');
     }
-  }, 200);
+  });
+
+  // ---- Import presets from JSON file ----
+  document.getElementById('importPresetsBtn').addEventListener('click', () => {
+    document.getElementById('importFileInput').click();
+  });
+
+  document.getElementById('importFileInput').addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    try {
+      const text = await file.text();
+      const presets = JSON.parse(text);
+
+      if (typeof presets !== 'object' || presets === null || Array.isArray(presets)) {
+        alert('El archivo JSON debe contener un objeto con los presets');
+        return;
+      }
+
+      const names = Object.keys(presets);
+      if (names.length === 0) {
+        alert('El archivo no contiene ningún preset');
+        return;
+      }
+
+      // Warn about existing presets that will be overwritten
+      const existing = names.filter(n => presetCache[n]);
+      if (existing.length > 0) {
+        if (!confirm(`Se importarán ${names.length} presets (${existing.length} sobrescribirán existentes):\n${existing.join('\n')}\n\n¿Continuar?`)) {
+          e.target.value = '';
+          return;
+        }
+      }
+
+      let imported = 0;
+      let skipped = 0;
+      for (const [name, data] of Object.entries(presets)) {
+        if (typeof data !== 'object' || data === null) {
+          console.warn('Import: preset "' + name + '" inválido, se salta');
+          skipped++;
+          continue;
+        }
+        // Strip thumbnail if present to keep server storage clean
+        const { thumbnail, ...cleanData } = data;
+        // Ensure all required keys exist with defaults
+        const preset = {
+          frequency: cleanData.frequency || '3',
+          amplitude: cleanData.amplitude || '1.2',
+          sigma: cleanData.sigma || '0.9',
+          orientation: cleanData.orientation || '0.6',
+          warp: cleanData.warp || '2.5',
+          rippleAmount: cleanData.rippleAmount || '0.15',
+          rippleFreq: cleanData.rippleFreq || '1.0',
+          rippleSpeed: cleanData.rippleSpeed || '1.0',
+          glowIntensity: cleanData.glowIntensity || '0.35',
+          glowRadius: cleanData.glowRadius || '0.5',
+          brightness: cleanData.brightness || '1.0',
+          contrast: cleanData.contrast || '1.0',
+          color1: cleanData.color1 || '#ff0000',
+          color2: cleanData.color2 || '#000000',
+          color3: cleanData.color3 || '#7c5cfc',
+        };
+        await savePresetOnServer(name, preset);
+        imported++;
+      }
+
+      renderPresetGrid();
+
+      let msg = `Se importaron ${imported} presets correctamente`;
+      if (skipped > 0) msg += `. ${skipped} presets se saltaron por ser inválidos.`;
+      alert(msg);
+    } catch (err) {
+      console.error('Error importing presets:', err);
+      alert('Error al importar los presets. Verifica que el archivo sea un JSON válido.');
+    }
+
+    // Reset input so the same file can be re-imported
+    e.target.value = '';
+  });
+
+  // ---- Init ----
+  initColorPalettes();
+  initBCPresets();
+
+  // Load presets from server, then render grid
+  async function initPresets() {
+    await loadPresetList();
+    renderPresetGrid();
+
+    // Generate thumbnails for existing presets after shader is ready
+    const thumbCheckInterval = setInterval(() => {
+      if (previewShaderReady) {
+        clearInterval(thumbCheckInterval);
+        generateMissingThumbnails();
+      }
+    }, 200);
+  }
+  initPresets();
 
   // ---- Connect WebSocket ----
   connectWS();

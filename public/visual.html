@@ -204,8 +204,10 @@
         uDensity:    gl.getUniformLocation(gaborProgram, 'uDensity'),
         uRippleAmount:gl.getUniformLocation(gaborProgram, 'uRippleAmount'),
         uRippleFreq: gl.getUniformLocation(gaborProgram, 'uRippleFreq'),
-        uRippleSpeed:gl.getUniformLocation(gaborProgram, 'uRippleSpeed'),
-      };
+      uRippleSpeed:gl.getUniformLocation(gaborProgram, 'uRippleSpeed'),
+      uBrightness: gl.getUniformLocation(gaborProgram, 'uBrightness'),
+      uContrast:   gl.getUniformLocation(gaborProgram, 'uContrast'),
+    };
       return true;
     }
 
@@ -242,6 +244,8 @@
       rippleAmount: 0.15,
       rippleFreq:   1.0,
       rippleSpeed:  1.0,
+      brightness:   1.0,
+      contrast:     1.0,
     };
 
     // ---- Interpolation ----
@@ -329,6 +333,8 @@
       gl.uniform1f(gaborUniforms.uRippleAmount, current.rippleAmount);
       gl.uniform1f(gaborUniforms.uRippleFreq, current.rippleFreq);
       gl.uniform1f(gaborUniforms.uRippleSpeed, current.rippleSpeed);
+      gl.uniform1f(gaborUniforms.uBrightness, current.brightness);
+      gl.uniform1f(gaborUniforms.uContrast, current.contrast);
 
       gl.drawArrays(gl.TRIANGLES, 0, 6);
 
@@ -397,6 +403,8 @@
             if (d.rippleAmount !== undefined) params.rippleAmount = d.rippleAmount;
             if (d.rippleFreq !== undefined) params.rippleFreq = d.rippleFreq;
             if (d.rippleSpeed !== undefined) params.rippleSpeed = d.rippleSpeed;
+            if (d.brightness !== undefined) params.brightness = d.brightness;
+            if (d.contrast !== undefined) params.contrast = d.contrast;
             if (d.glowIntensity !== undefined) params.glowIntensity = d.glowIntensity;
             if (d.glowRadius !== undefined) params.glowRadius = d.glowRadius;
             if (d.color1) params.color1 = d.color1;

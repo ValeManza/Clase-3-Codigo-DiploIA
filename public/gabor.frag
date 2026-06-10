@@ -19,6 +19,8 @@ uniform float uDensity;
 uniform float uRippleAmount;
 uniform float uRippleFreq;
 uniform float uRippleSpeed;
+uniform float uBrightness;
+uniform float uContrast;
 
 #define PI 3.14159265359
 
@@ -161,6 +163,11 @@ void main() {
     vec2 vig = uv - 0.5;
     float vignette = 1.0 - dot(vig, vig) * 0.5;
     color *= vignette;
+
+    // --- Brightness & Contrast ---
+    color *= uBrightness;
+    color = (color - 0.5) * uContrast + 0.5;
+    color = clamp(color, 0.0, 1.0);
 
     gl_FragColor = vec4(color, 1.0);
 }
