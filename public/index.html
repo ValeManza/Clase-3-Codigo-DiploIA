@@ -206,14 +206,6 @@
     </div>
   </div>
 
-  <!-- ===== Brightness/Contrast Presets ===== -->
-  <div class="section">
-    <div class="section-title">Ajustes Predefinidos</div>
-    <div class="card card-full">
-      <div class="bc-preset-grid" id="bcPresetGrid"></div>
-    </div>
-  </div>
-
   <!-- ===== User Presets Section ===== -->
   <div class="section">
     <div class="section-title">
@@ -723,45 +715,11 @@
   }
 
   // ============================================================
-  //  Brightness / Contrast Presets
-  // ============================================================
-
-  const BC_PRESETS = [
-    { name: 'Normal',         b: '1.00', c: '1.00' },
-    { name: 'Brillante',      b: '1.30', c: '1.20' },
-    { name: 'Alto Contraste', b: '1.00', c: '1.80' },
-    { name: 'Oscuro',         b: '0.70', c: '1.30' },
-    { name: 'Suave',          b: '1.10', c: '0.80' },
-    { name: 'Vívido',         b: '1.25', c: '1.50' },
-    { name: 'Opaco',          b: '0.85', c: '0.70' },
-    { name: 'Saturado',       b: '1.40', c: '2.00' },
-  ];
-
-  function initBCPresets() {
-    const grid = document.getElementById('bcPresetGrid');
-    grid.innerHTML = '';
-    BC_PRESETS.forEach(p => {
-      const btn = document.createElement('button');
-      btn.className = 'bc-preset-btn';
-      btn.textContent = p.name;
-      btn.dataset.brightness = p.b;
-      btn.dataset.contrast = p.c;
-      btn.addEventListener('click', () => {
-        document.getElementById('brightness').value = p.b;
-        document.getElementById('contrast').value = p.c;
-        document.getElementById('brightnessVal').textContent = parseFloat(p.b).toFixed(2);
-        document.getElementById('contrastVal').textContent = parseFloat(p.c).toFixed(2);
-        readSliderParamsFromUI();
-        snapDisplayParams();
-        sendParams();
-      });
-      grid.appendChild(btn);
-    });
-  }
-
-  // ============================================================
   //  User Presets (API) — Visual Grid with Thumbnails
   // ============================================================
+
+  // Presets incluidos por defecto que no pueden eliminarse
+  const PROTECTED_PRESETS = ['Cebra', 'Gotas', 'Paisaje cyber', 'Seda'];
 
   let presetCache = {};
 
@@ -790,8 +748,13 @@
 
   async function deletePresetOnServer(name) {
     try {
-      await fetch('/api/presets/' + encodeURIComponent(name), { method: 'DELETE' });
-      delete presetCache[name];
+      const res = await fetch('/api/presets/' + encodeURIComponent(name), { method: 'DELETE' });
+      if (res.ok) {
+        delete presetCache[name];
+      } else {
+        const err = await res.json().catch(() => ({}));
+        console.error('Error deleting preset:', err.error || res.statusText);
+      }
     } catch (err) {
       console.error('Error deleting preset:', err);
     }
@@ -848,16 +811,19 @@
       label.textContent = name;
       card.appendChild(label);
 
-      // Delete button (shown on hover)
-      const delBtn = document.createElement('button');
-      delBtn.className = 'preset-delete-btn';
-      delBtn.title = 'Eliminar preset';
-      delBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 6L6 18M6 6l12 12"/></svg>';
-      delBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        deletePreset(name);
-      });
-      card.appendChild(delBtn);
+      // Delete button (only shown for user-created presets)
+      const isProtected = PROTECTED_PRESETS.includes(name);
+      if (!isProtected) {
+        const delBtn = document.createElement('button');
+        delBtn.className = 'preset-delete-btn';
+        delBtn.title = 'Eliminar preset';
+        delBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 6L6 18M6 6l12 12"/></svg>';
+        delBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          deletePreset(name);
+        });
+        card.appendChild(delBtn);
+      }
 
       // Click to load
       card.addEventListener('click', () => {
@@ -1083,8 +1049,12 @@
     previewCanvas.classList.add('preset-flash');
   });
 
-  // ---- Delete a preset ----
+  // ---- Delete a preset (only user-created ones) ----
   async function deletePreset(name) {
+    if (PROTECTED_PRESETS.includes(name)) {
+      alert('Los presets por defecto no pueden eliminarse');
+      return;
+    }
     if (!confirm(`¿Eliminar preset "${name}"?`)) return;
     await deletePresetOnServer(name);
     if (selectedPreset === name) selectedPreset = null;
@@ -1216,7 +1186,6 @@
 
   // ---- Init ----
   initColorPalettes();
-  initBCPresets();
 
   // Load presets from server, then render grid
   async function initPresets() {

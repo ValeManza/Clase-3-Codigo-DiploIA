@@ -637,39 +637,6 @@ input[type="range"]::-moz-range-thumb {
   white-space: nowrap;
 }
 
-/* =============================================
-   Brightness / Contrast Presets
-   ============================================= */
-
-.bc-preset-grid {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.bc-preset-btn {
-  padding: 8px 16px;
-  border: 1px solid var(--border);
-  border-radius: 20px;
-  background: var(--bg-input);
-  color: var(--text-secondary);
-  font-size: 12px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.bc-preset-btn:hover {
-  border-color: var(--accent);
-  color: var(--accent);
-  background: var(--accent-glow);
-  transform: translateY(-1px);
-}
-
-.bc-preset-btn:active {
-  transform: translateY(0) scale(0.97);
-}
-
 /* ===== Responsive tweaks ===== */
 @media (max-width: 640px) {
   .save-area {

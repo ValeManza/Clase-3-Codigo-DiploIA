@@ -19,7 +19,9 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 const PRESETS_PATH = path.join(__dirname, 'presets.json');
 
-// Beautiful default presets shipped with the app
+// Presets shipped with the app — protected from deletion
+const PROTECTED_PRESETS = new Set(['Cebra', 'Gotas', 'Paisaje cyber', 'Seda']);
+
 const DEFAULT_PRESETS = {
   "Cebra": {
     frequency: "3", amplitude: "2.4", sigma: "1.75", orientation: "0.2",
@@ -106,9 +108,12 @@ app.post('/api/presets', (req, res) => {
   res.json({ success: true, name });
 });
 
-// DELETE /api/presets/:name — delete a preset
+// DELETE /api/presets/:name — delete a preset (only user-created ones)
 app.delete('/api/presets/:name', (req, res) => {
   const name = decodeURIComponent(req.params.name);
+  if (PROTECTED_PRESETS.has(name)) {
+    return res.status(403).json({ error: 'Los presets por defecto no pueden eliminarse' });
+  }
   if (presetStore[name]) {
     delete presetStore[name];
     savePresets();
